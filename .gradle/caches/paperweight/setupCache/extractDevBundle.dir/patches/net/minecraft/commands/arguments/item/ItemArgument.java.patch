@@ -1,0 +1,25 @@
+--- a/net/minecraft/commands/arguments/item/ItemArgument.java
++++ b/net/minecraft/commands/arguments/item/ItemArgument.java
+@@ -16,7 +16,12 @@
+     private final ItemParser parser;
+ 
+     public ItemArgument(CommandBuildContext commandRegistryAccess) {
+-        this.parser = new ItemParser(commandRegistryAccess);
++        // Paper start - support component removals
++        this(commandRegistryAccess, false);
++    }
++    public ItemArgument(CommandBuildContext commandRegistryAccess, boolean allowRemovals) {
++        this.parser = new ItemParser(commandRegistryAccess, allowRemovals);
++        // Paper end - support component removals
+     }
+ 
+     public static ItemArgument item(CommandBuildContext commandRegistryAccess) {
+@@ -25,7 +30,7 @@
+ 
+     public ItemInput parse(StringReader stringReader) throws CommandSyntaxException {
+         ItemParser.ItemResult itemResult = this.parser.parse(stringReader);
+-        return new ItemInput(itemResult.item(), itemResult.components());
++        return new ItemInput(itemResult.item(), itemResult.components(), itemResult.patch()); // Paper - support component removals
+     }
+ 
+     public static <S> ItemInput getItem(CommandContext<S> context, String name) {

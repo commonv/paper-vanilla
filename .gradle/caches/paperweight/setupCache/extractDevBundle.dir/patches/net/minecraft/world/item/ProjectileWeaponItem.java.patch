@@ -1,0 +1,217 @@
+--- a/net/minecraft/world/item/ProjectileWeaponItem.java
++++ b/net/minecraft/world/item/ProjectileWeaponItem.java
+@@ -17,8 +17,13 @@
+ import net.minecraft.world.level.Level;
+ 
+ public abstract class ProjectileWeaponItem extends Item {
+-    public static final Predicate<ItemStack> ARROW_ONLY = stack -> stack.is(ItemTags.ARROWS);
+-    public static final Predicate<ItemStack> ARROW_OR_FIREWORK = ARROW_ONLY.or(stack -> stack.is(Items.FIREWORK_ROCKET));
++
++    public static final Predicate<ItemStack> ARROW_ONLY = (itemstack) -> {
++        return itemstack.is(ItemTags.ARROWS);
++    };
++    public static final Predicate<ItemStack> ARROW_OR_FIREWORK = ProjectileWeaponItem.ARROW_ONLY.or((itemstack) -> {
++        return itemstack.is(Items.FIREWORK_ROCKET);
++    });
+ 
+     public ProjectileWeaponItem(Item.Properties settings) {
+         super(settings);
+@@ -31,11 +36,7 @@
+     public abstract Predicate<ItemStack> getAllSupportedProjectiles();
+ 
+     public static ItemStack getHeldProjectile(LivingEntity entity, Predicate<ItemStack> predicate) {
+-        if (predicate.test(entity.getItemInHand(InteractionHand.OFF_HAND))) {
+-            return entity.getItemInHand(InteractionHand.OFF_HAND);
+-        } else {
+-            return predicate.test(entity.getItemInHand(InteractionHand.MAIN_HAND)) ? entity.getItemInHand(InteractionHand.MAIN_HAND) : ItemStack.EMPTY;
+-        }
++        return predicate.test(entity.getItemInHand(InteractionHand.OFF_HAND)) ? entity.getItemInHand(InteractionHand.OFF_HAND) : (predicate.test(entity.getItemInHand(InteractionHand.MAIN_HAND)) ? entity.getItemInHand(InteractionHand.MAIN_HAND) : ItemStack.EMPTY);
+     }
+ 
+     @Override
+@@ -45,70 +46,92 @@
+ 
+     public abstract int getDefaultProjectileRange();
+ 
+-    protected void shoot(
+-        Level world,
+-        LivingEntity shooter,
+-        InteractionHand hand,
+-        ItemStack stack,
+-        List<ItemStack> projectiles,
+-        float speed,
+-        float divergence,
+-        boolean critical,
+-        @Nullable LivingEntity target
+-    ) {
+-        float f = 10.0F;
+-        float g = projectiles.size() == 1 ? 0.0F : 20.0F / (float)(projectiles.size() - 1);
+-        float h = (float)((projectiles.size() - 1) % 2) * g / 2.0F;
+-        float i = 1.0F;
++    protected void shoot(Level world, LivingEntity shooter, InteractionHand hand, ItemStack stack, List<ItemStack> projectiles, float speed, float divergence, boolean critical, @Nullable LivingEntity target) {
++        float f2 = 10.0F;
++        float f3 = projectiles.size() == 1 ? 0.0F : 20.0F / (float) (projectiles.size() - 1);
++        float f4 = (float) ((projectiles.size() - 1) % 2) * f3 / 2.0F;
++        float f5 = 1.0F;
+ 
+-        for (int j = 0; j < projectiles.size(); j++) {
+-            ItemStack itemStack = projectiles.get(j);
+-            if (!itemStack.isEmpty()) {
+-                float k = h + i * (float)((j + 1) / 2) * g;
+-                i = -i;
+-                stack.hurtAndBreak(this.getDurabilityUse(itemStack), shooter, LivingEntity.getSlotForHand(hand));
+-                Projectile projectile = this.createProjectile(world, shooter, stack, itemStack, critical);
+-                this.shootProjectile(shooter, projectile, j, speed, divergence, k, target);
+-                world.addFreshEntity(projectile);
++        for (int i = 0; i < projectiles.size(); ++i) {
++            ItemStack itemstack1 = (ItemStack) projectiles.get(i);
++
++            if (!itemstack1.isEmpty()) {
++                float f6 = f4 + f5 * (float) ((i + 1) / 2) * f3;
++
++                f5 = -f5;
++                // itemstack.hurtAndBreak(this.getDurabilityUse(itemstack1), entityliving, EntityLiving.getSlotForHand(enumhand)); // CraftBukkit - moved down
++                Projectile iprojectile = this.createProjectile(world, shooter, stack, itemstack1, critical);
++
++                this.shootProjectile(shooter, iprojectile, i, speed, divergence, f6, target);
++                // CraftBukkit start
++                org.bukkit.event.entity.EntityShootBowEvent event = org.bukkit.craftbukkit.event.CraftEventFactory.callEntityShootBowEvent(shooter, stack, itemstack1, iprojectile, hand, speed, true);
++                if (event.isCancelled()) {
++                    event.getProjectile().remove();
++                    return;
++                }
++
++                stack.hurtAndBreak(this.getDurabilityUse(itemstack1), shooter, LivingEntity.getSlotForHand(hand));
++
++                if (event.getProjectile() == iprojectile.getBukkitEntity()) {
++                    if (!world.addFreshEntity(iprojectile)) {
++                        if (shooter instanceof net.minecraft.server.level.ServerPlayer) {
++                            ((net.minecraft.server.level.ServerPlayer) shooter).getBukkitEntity().updateInventory();
++                        }
++                        return;
++                    }
++                }
++                // CraftBukkit end
+             }
+         }
++
+     }
+ 
+     protected int getDurabilityUse(ItemStack projectile) {
+         return 1;
+     }
+ 
+-    protected abstract void shootProjectile(
+-        LivingEntity shooter, Projectile projectile, int index, float speed, float divergence, float yaw, @Nullable LivingEntity target
+-    );
++    protected abstract void shootProjectile(LivingEntity shooter, Projectile projectile, int index, float speed, float divergence, float yaw, @Nullable LivingEntity target);
+ 
+     protected Projectile createProjectile(Level world, LivingEntity shooter, ItemStack weaponStack, ItemStack projectileStack, boolean critical) {
+-        ArrowItem arrowItem2 = projectileStack.getItem() instanceof ArrowItem arrowItem ? arrowItem : (ArrowItem)Items.ARROW;
+-        AbstractArrow abstractArrow = arrowItem2.createArrow(world, projectileStack, shooter);
++        Item item = projectileStack.getItem();
++        ArrowItem itemarrow;
++
++        if (item instanceof ArrowItem itemarrow1) {
++            itemarrow = itemarrow1;
++        } else {
++            itemarrow = (ArrowItem) Items.ARROW;
++        }
++
++        ArrowItem itemarrow2 = itemarrow;
++        AbstractArrow entityarrow = itemarrow2.createArrow(world, projectileStack, shooter);
++
+         if (critical) {
+-            abstractArrow.setCritArrow(true);
++            entityarrow.setCritArrow(true);
+         }
+ 
+         int i = EnchantmentHelper.getItemEnchantmentLevel(Enchantments.POWER, weaponStack);
++
+         if (i > 0) {
+-            abstractArrow.setBaseDamage(abstractArrow.getBaseDamage() + (double)i * 0.5 + 0.5);
++            entityarrow.setBaseDamage(entityarrow.getBaseDamage() + (double) i * 0.5D + 0.5D);
+         }
+ 
+         int j = EnchantmentHelper.getItemEnchantmentLevel(Enchantments.PUNCH, weaponStack);
++
+         if (j > 0) {
+-            abstractArrow.setKnockback(j);
++            entityarrow.setKnockback(j);
+         }
+ 
+         if (EnchantmentHelper.getItemEnchantmentLevel(Enchantments.FLAME, weaponStack) > 0) {
+-            abstractArrow.igniteForSeconds(100);
++            entityarrow.igniteForSeconds(100);
+         }
+ 
+         int k = EnchantmentHelper.getItemEnchantmentLevel(Enchantments.PIERCING, weaponStack);
++
+         if (k > 0) {
+-            abstractArrow.setPierceLevel((byte)k);
++            entityarrow.setPierceLevel((byte) k);
+         }
+ 
+-        return abstractArrow;
++        return entityarrow;
+     }
+ 
+     protected static boolean hasInfiniteArrows(ItemStack weaponStack, ItemStack projectileStack, boolean creative) {
+@@ -116,16 +139,21 @@
+     }
+ 
+     protected static List<ItemStack> draw(ItemStack weaponStack, ItemStack projectileStack, LivingEntity shooter) {
++    // Paper start
++        return draw(weaponStack, projectileStack, shooter, true);
++    }
++    protected static List<ItemStack> draw(ItemStack weaponStack, ItemStack projectileStack, LivingEntity shooter, boolean consume) {
++    // Paper end
+         if (projectileStack.isEmpty()) {
+             return List.of();
+         } else {
+             int i = EnchantmentHelper.getItemEnchantmentLevel(Enchantments.MULTISHOT, weaponStack);
+             int j = i == 0 ? 1 : 3;
+-            List<ItemStack> list = new ArrayList<>(j);
+-            ItemStack itemStack = projectileStack.copy();
++            List<ItemStack> list = new ArrayList(j);
++            ItemStack itemstack2 = projectileStack.copy();
+ 
+-            for (int k = 0; k < j; k++) {
+-                list.add(useAmmo(weaponStack, k == 0 ? projectileStack : itemStack, shooter, k > 0));
++            for (int k = 0; k < j; ++k) {
++                list.add(ProjectileWeaponItem.useAmmo(weaponStack, k == 0 ? projectileStack : itemstack2, shooter, k > 0 || !consume)); // Paper
+             }
+ 
+             return list;
+@@ -133,18 +161,22 @@
+     }
+ 
+     protected static ItemStack useAmmo(ItemStack weaponStack, ItemStack projectileStack, LivingEntity shooter, boolean multishot) {
+-        boolean bl = !multishot && !hasInfiniteArrows(weaponStack, projectileStack, shooter.hasInfiniteMaterials());
+-        if (!bl) {
+-            ItemStack itemStack = projectileStack.copyWithCount(1);
+-            itemStack.set(DataComponents.INTANGIBLE_PROJECTILE, Unit.INSTANCE);
+-            return itemStack;
++        boolean flag1 = !multishot && !ProjectileWeaponItem.hasInfiniteArrows(weaponStack, projectileStack, shooter.hasInfiniteMaterials());
++        ItemStack itemstack2;
++
++        if (!flag1) {
++            itemstack2 = projectileStack.copyWithCount(1);
++            itemstack2.set(DataComponents.INTANGIBLE_PROJECTILE, Unit.INSTANCE);
++            return itemstack2;
+         } else {
+-            ItemStack itemStack2 = projectileStack.split(1);
+-            if (projectileStack.isEmpty() && shooter instanceof Player player) {
+-                player.getInventory().removeItem(projectileStack);
++            itemstack2 = projectileStack.split(1);
++            if (projectileStack.isEmpty() && shooter instanceof Player) {
++                Player entityhuman = (Player) shooter;
++
++                entityhuman.getInventory().removeItem(projectileStack);
+             }
+ 
+-            return itemStack2;
++            return itemstack2;
+         }
+     }
+ }

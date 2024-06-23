@@ -1,0 +1,246 @@
+--- a/net/minecraft/world/item/ArmorItem.java
++++ b/net/minecraft/world/item/ArmorItem.java
+@@ -8,6 +8,7 @@
+ import java.util.function.Supplier;
+ import net.minecraft.Util;
+ import net.minecraft.core.BlockPos;
++import net.minecraft.core.Direction;
+ import net.minecraft.core.Holder;
+ import net.minecraft.core.dispenser.BlockSource;
+ import net.minecraft.core.dispenser.DefaultDispenseItemBehavior;
+@@ -25,46 +26,86 @@
+ import net.minecraft.world.entity.ai.attributes.Attributes;
+ import net.minecraft.world.entity.player.Player;
+ import net.minecraft.world.item.component.ItemAttributeModifiers;
++import net.minecraft.world.item.crafting.Ingredient;
+ import net.minecraft.world.level.Level;
+ import net.minecraft.world.level.block.DispenserBlock;
+ import net.minecraft.world.phys.AABB;
++// CraftBukkit start
++import org.bukkit.craftbukkit.block.CraftBlock;
++import org.bukkit.craftbukkit.inventory.CraftItemStack;
++import org.bukkit.event.block.BlockDispenseArmorEvent;
++// CraftBukkit end
+ 
+ public class ArmorItem extends Item implements Equipable {
+-    private static final EnumMap<ArmorItem.Type, UUID> ARMOR_MODIFIER_UUID_PER_TYPE = Util.make(new EnumMap<>(ArmorItem.Type.class), uuidMap -> {
+-        uuidMap.put(ArmorItem.Type.BOOTS, UUID.fromString("845DB27C-C624-495F-8C9F-6020A9A58B6B"));
+-        uuidMap.put(ArmorItem.Type.LEGGINGS, UUID.fromString("D8499B04-0E66-4726-AB29-64469D734E0D"));
+-        uuidMap.put(ArmorItem.Type.CHESTPLATE, UUID.fromString("9F3D476D-C118-4544-8365-64846904B48E"));
+-        uuidMap.put(ArmorItem.Type.HELMET, UUID.fromString("2AD3F246-FEE1-4E67-B886-69FD380BB150"));
+-        uuidMap.put(ArmorItem.Type.BODY, UUID.fromString("C1C72771-8B8E-BA4A-ACE0-81A93C8928B2"));
++
++    private static final EnumMap<ArmorItem.Type, UUID> ARMOR_MODIFIER_UUID_PER_TYPE = (EnumMap) Util.make(new EnumMap(ArmorItem.Type.class), (enummap) -> {
++        enummap.put(ArmorItem.Type.BOOTS, UUID.fromString("845DB27C-C624-495F-8C9F-6020A9A58B6B"));
++        enummap.put(ArmorItem.Type.LEGGINGS, UUID.fromString("D8499B04-0E66-4726-AB29-64469D734E0D"));
++        enummap.put(ArmorItem.Type.CHESTPLATE, UUID.fromString("9F3D476D-C118-4544-8365-64846904B48E"));
++        enummap.put(ArmorItem.Type.HELMET, UUID.fromString("2AD3F246-FEE1-4E67-B886-69FD380BB150"));
++        enummap.put(ArmorItem.Type.BODY, UUID.fromString("C1C72771-8B8E-BA4A-ACE0-81A93C8928B2"));
+     });
+     public static final DispenseItemBehavior DISPENSE_ITEM_BEHAVIOR = new DefaultDispenseItemBehavior() {
+         @Override
+         protected ItemStack execute(BlockSource pointer, ItemStack stack) {
+-            return ArmorItem.dispenseArmor(pointer, stack) ? stack : super.execute(pointer, stack);
++            return ArmorItem.dispenseArmor(pointer, stack, this) ? stack : super.execute(pointer, stack); // Paper - fix possible StackOverflowError
+         }
+     };
+     protected final ArmorItem.Type type;
+     protected final Holder<ArmorMaterial> material;
+     private final Supplier<ItemAttributeModifiers> defaultModifiers;
+ 
++    @Deprecated @io.papermc.paper.annotation.DoNotUse // Paper
+     public static boolean dispenseArmor(BlockSource pointer, ItemStack armor) {
+-        BlockPos blockPos = pointer.pos().relative(pointer.state().getValue(DispenserBlock.FACING));
+-        List<LivingEntity> list = pointer.level()
+-            .getEntitiesOfClass(
+-                LivingEntity.class, new AABB(blockPos), EntitySelector.NO_SPECTATORS.and(new EntitySelector.MobCanWearArmorEntitySelector(armor))
+-            );
++        // Paper start
++        return dispenseArmor(pointer, armor, null);
++    }
++    public static boolean dispenseArmor(BlockSource pointer, ItemStack armor, @javax.annotation.Nullable DispenseItemBehavior currentBehavior) {
++        // Paper end
++        BlockPos blockposition = pointer.pos().relative((Direction) pointer.state().getValue(DispenserBlock.FACING));
++        List<LivingEntity> list = pointer.level().getEntitiesOfClass(LivingEntity.class, new AABB(blockposition), EntitySelector.NO_SPECTATORS.and(new EntitySelector.MobCanWearArmorEntitySelector(armor)));
++
+         if (list.isEmpty()) {
+             return false;
+         } else {
+-            LivingEntity livingEntity = list.get(0);
+-            EquipmentSlot equipmentSlot = Mob.getEquipmentSlotForItem(armor);
+-            ItemStack itemStack = armor.split(1);
+-            livingEntity.setItemSlot(equipmentSlot, itemStack);
+-            if (livingEntity instanceof Mob) {
+-                ((Mob)livingEntity).setDropChance(equipmentSlot, 2.0F);
+-                ((Mob)livingEntity).setPersistenceRequired();
++            LivingEntity entityliving = (LivingEntity) list.get(0);
++            EquipmentSlot enumitemslot = Mob.getEquipmentSlotForItem(armor);
++            ItemStack itemstack1 = armor.copyWithCount(1); // Paper - shrink below and single item in event
++            // CraftBukkit start
++            Level world = pointer.level();
++            org.bukkit.block.Block block = CraftBlock.at(world, pointer.pos());
++            CraftItemStack craftItem = CraftItemStack.asCraftMirror(itemstack1);
++
++            BlockDispenseArmorEvent event = new BlockDispenseArmorEvent(block, craftItem.clone(), (org.bukkit.craftbukkit.entity.CraftLivingEntity) entityliving.getBukkitEntity());
++            if (!DispenserBlock.eventFired) {
++                world.getCraftServer().getPluginManager().callEvent(event);
++            }
++
++            if (event.isCancelled()) {
++                // armor.grow(1); // Paper - shrink below
++                return false;
++            }
++
++            boolean shrink = true; // Paper
++            if (!event.getItem().equals(craftItem)) {
++                shrink = false; // Paper - shrink below
++                // Chain to handler for new item
++                ItemStack eventStack = CraftItemStack.asNMSCopy(event.getItem());
++                DispenseItemBehavior idispensebehavior = (DispenseItemBehavior) DispenserBlock.DISPENSER_REGISTRY.get(eventStack.getItem());
++                if (idispensebehavior != DispenseItemBehavior.NOOP && (currentBehavior == null || idispensebehavior != currentBehavior)) { // Paper - fix possible StackOverflowError
++                    idispensebehavior.dispense(pointer, eventStack);
++                    return true;
++                }
++            }
++
++            entityliving.setItemSlot(enumitemslot, CraftItemStack.asNMSCopy(event.getItem()));
++            // CraftBukkit end
++            if (entityliving instanceof Mob) {
++                ((Mob) entityliving).setDropChance(enumitemslot, 2.0F);
++                ((Mob) entityliving).setPersistenceRequired();
+             }
+ 
++            if (shrink) armor.shrink(1); // Paper
+             return true;
+         }
+     }
+@@ -73,34 +114,24 @@
+         super(settings);
+         this.material = material;
+         this.type = type;
+-        DispenserBlock.registerBehavior(this, DISPENSE_ITEM_BEHAVIOR);
+-        this.defaultModifiers = Suppliers.memoize(
+-            () -> {
+-                int i = material.value().getDefense(type);
+-                float f = material.value().toughness();
+-                ItemAttributeModifiers.Builder builder = ItemAttributeModifiers.builder();
+-                EquipmentSlotGroup equipmentSlotGroup = EquipmentSlotGroup.bySlot(type.getSlot());
+-                UUID uUID = ARMOR_MODIFIER_UUID_PER_TYPE.get(type);
+-                builder.add(
+-                    Attributes.ARMOR, new AttributeModifier(uUID, "Armor modifier", (double)i, AttributeModifier.Operation.ADD_VALUE), equipmentSlotGroup
+-                );
+-                builder.add(
+-                    Attributes.ARMOR_TOUGHNESS,
+-                    new AttributeModifier(uUID, "Armor toughness", (double)f, AttributeModifier.Operation.ADD_VALUE),
+-                    equipmentSlotGroup
+-                );
+-                float g = material.value().knockbackResistance();
+-                if (g > 0.0F) {
+-                    builder.add(
+-                        Attributes.KNOCKBACK_RESISTANCE,
+-                        new AttributeModifier(uUID, "Armor knockback resistance", (double)g, AttributeModifier.Operation.ADD_VALUE),
+-                        equipmentSlotGroup
+-                    );
+-                }
++        DispenserBlock.registerBehavior(this, ArmorItem.DISPENSE_ITEM_BEHAVIOR);
++        this.defaultModifiers = Suppliers.memoize(() -> {
++            int i = ((ArmorMaterial) material.value()).getDefense(type);
++            float f = ((ArmorMaterial) material.value()).toughness();
++            ItemAttributeModifiers.Builder itemattributemodifiers_a = ItemAttributeModifiers.builder();
++            EquipmentSlotGroup equipmentslotgroup = EquipmentSlotGroup.bySlot(type.getSlot());
++            UUID uuid = (UUID) ArmorItem.ARMOR_MODIFIER_UUID_PER_TYPE.get(type);
+ 
+-                return builder.build();
++            itemattributemodifiers_a.add(Attributes.ARMOR, new AttributeModifier(uuid, "Armor modifier", (double) i, AttributeModifier.Operation.ADD_VALUE), equipmentslotgroup);
++            itemattributemodifiers_a.add(Attributes.ARMOR_TOUGHNESS, new AttributeModifier(uuid, "Armor toughness", (double) f, AttributeModifier.Operation.ADD_VALUE), equipmentslotgroup);
++            float f1 = ((ArmorMaterial) material.value()).knockbackResistance();
++
++            if (f1 > 0.0F) {
++                itemattributemodifiers_a.add(Attributes.KNOCKBACK_RESISTANCE, new AttributeModifier(uuid, "Armor knockback resistance", (double) f1, AttributeModifier.Operation.ADD_VALUE), equipmentslotgroup);
+             }
+-        );
++
++            return itemattributemodifiers_a.build();
++        });
+     }
+ 
+     public ArmorItem.Type getType() {
+@@ -109,7 +140,7 @@
+ 
+     @Override
+     public int getEnchantmentValue() {
+-        return this.material.value().enchantmentValue();
++        return ((ArmorMaterial) this.material.value()).enchantmentValue();
+     }
+ 
+     public Holder<ArmorMaterial> getMaterial() {
+@@ -118,7 +149,7 @@
+ 
+     @Override
+     public boolean isValidRepairItem(ItemStack stack, ItemStack ingredient) {
+-        return this.material.value().repairIngredient().get().test(ingredient) || super.isValidRepairItem(stack, ingredient);
++        return ((Ingredient) ((ArmorMaterial) this.material.value()).repairIngredient().get()).test(ingredient) || super.isValidRepairItem(stack, ingredient);
+     }
+ 
+     @Override
+@@ -128,15 +159,15 @@
+ 
+     @Override
+     public ItemAttributeModifiers getDefaultAttributeModifiers() {
+-        return this.defaultModifiers.get();
++        return (ItemAttributeModifiers) this.defaultModifiers.get();
+     }
+ 
+     public int getDefense() {
+-        return this.material.value().getDefense(this.type);
++        return ((ArmorMaterial) this.material.value()).getDefense(this.type);
+     }
+ 
+     public float getToughness() {
+-        return this.material.value().toughness();
++        return ((ArmorMaterial) this.material.value()).toughness();
+     }
+ 
+     @Override
+@@ -146,25 +177,22 @@
+ 
+     @Override
+     public Holder<SoundEvent> getEquipSound() {
+-        return this.getMaterial().value().equipSound();
++        return ((ArmorMaterial) this.getMaterial().value()).equipSound();
+     }
+ 
+     public static enum Type implements StringRepresentable {
+-        HELMET(EquipmentSlot.HEAD, 11, "helmet"),
+-        CHESTPLATE(EquipmentSlot.CHEST, 16, "chestplate"),
+-        LEGGINGS(EquipmentSlot.LEGS, 15, "leggings"),
+-        BOOTS(EquipmentSlot.FEET, 13, "boots"),
+-        BODY(EquipmentSlot.BODY, 16, "body");
++
++        HELMET(EquipmentSlot.HEAD, 11, "helmet"), CHESTPLATE(EquipmentSlot.CHEST, 16, "chestplate"), LEGGINGS(EquipmentSlot.LEGS, 15, "leggings"), BOOTS(EquipmentSlot.FEET, 13, "boots"), BODY(EquipmentSlot.BODY, 16, "body");
+ 
+         public static final Codec<ArmorItem.Type> CODEC = StringRepresentable.fromValues(ArmorItem.Type::values);
+         private final EquipmentSlot slot;
+         private final String name;
+         private final int durability;
+ 
+-        private Type(final EquipmentSlot equipmentSlot, final int baseMaxDamage, final String name) {
+-            this.slot = equipmentSlot;
+-            this.name = name;
+-            this.durability = baseMaxDamage;
++        private Type(final EquipmentSlot enumitemslot, final int i, final String s) {
++            this.slot = enumitemslot;
++            this.name = s;
++            this.durability = i;
+         }
+ 
+         public int getDurability(int multiplier) {
+@@ -180,7 +208,7 @@
+         }
+ 
+         public boolean hasTrims() {
+-            return this == HELMET || this == CHESTPLATE || this == LEGGINGS || this == BOOTS;
++            return this == ArmorItem.Type.HELMET || this == ArmorItem.Type.CHESTPLATE || this == ArmorItem.Type.LEGGINGS || this == ArmorItem.Type.BOOTS;
+         }
+ 
+         @Override

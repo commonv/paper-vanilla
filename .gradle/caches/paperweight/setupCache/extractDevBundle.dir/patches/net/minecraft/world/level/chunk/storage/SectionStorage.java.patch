@@ -1,0 +1,127 @@
+--- a/net/minecraft/world/level/chunk/storage/SectionStorage.java
++++ b/net/minecraft/world/level/chunk/storage/SectionStorage.java
+@@ -12,6 +12,7 @@
+ import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+ import it.unimi.dsi.fastutil.longs.LongLinkedOpenHashSet;
+ import java.io.IOException;
++import java.nio.file.Path;
+ import java.util.Map;
+ import java.util.Optional;
+ import java.util.concurrent.CompletableFuture;
+@@ -31,25 +32,30 @@
+ import net.minecraft.world.level.LevelHeightAccessor;
+ import org.slf4j.Logger;
+ 
+-public class SectionStorage<R> implements AutoCloseable {
++public class SectionStorage<R> extends RegionFileStorage implements AutoCloseable { // Paper - nuke IOWorker
+     private static final Logger LOGGER = LogUtils.getLogger();
+     private static final String SECTIONS_TAG = "Sections";
+-    private final SimpleRegionStorage simpleRegionStorage;
++    // Paper - remove mojang I/O thread
+     private final Long2ObjectMap<Optional<R>> storage = new Long2ObjectOpenHashMap<>();
+     private final LongLinkedOpenHashSet dirty = new LongLinkedOpenHashSet();
+     private final Function<Runnable, Codec<R>> codec;
+     private final Function<Runnable, R> factory;
+-    private final RegistryAccess registryAccess;
++    public final RegistryAccess registryAccess; // Paper - rewrite chunk system - public
+     protected final LevelHeightAccessor levelHeightAccessor;
+ 
+     public SectionStorage(
++        // Paper start
++        RegionStorageInfo regionStorageInfo,
++        Path path,
++        boolean dsync,
++        // Paper end
+         SimpleRegionStorage storageAccess,
+         Function<Runnable, Codec<R>> codecFactory,
+         Function<Runnable, R> factory,
+         RegistryAccess registryManager,
+         LevelHeightAccessor world
+     ) {
+-        this.simpleRegionStorage = storageAccess;
++        super(regionStorageInfo, path, dsync); // Paper - remove mojang I/O thread
+         this.codec = codecFactory;
+         this.factory = factory;
+         this.registryAccess = registryManager;
+@@ -68,11 +74,11 @@
+     }
+ 
+     @Nullable
+-    protected Optional<R> get(long pos) {
++    public Optional<R> get(long pos) { // Paper - public
+         return this.storage.get(pos);
+     }
+ 
+-    protected Optional<R> getOrLoad(long pos) {
++    public Optional<R> getOrLoad(long pos) { // Paper - public
+         if (this.outsideStoredRange(pos)) {
+             return Optional.empty();
+         } else {
+@@ -112,23 +118,21 @@
+     }
+ 
+     private void readColumn(ChunkPos pos) {
+-        Optional<CompoundTag> optional = this.tryRead(pos).join();
+-        RegistryOps<Tag> registryOps = this.registryAccess.createSerializationContext(NbtOps.INSTANCE);
+-        this.readColumn(pos, registryOps, optional.orElse(null));
++        throw new IllegalStateException("Only chunk system can load in state, offending class:" + this.getClass().getName()); // Paper - rewrite chunk system
+     }
+ 
+     private CompletableFuture<Optional<CompoundTag>> tryRead(ChunkPos pos) {
+-        return this.simpleRegionStorage.read(pos).exceptionally(throwable -> {
+-            if (throwable instanceof IOException iOException) {
+-                LOGGER.error("Error reading chunk {} data from disk", pos, iOException);
+-                return Optional.empty();
+-            } else {
+-                throw new CompletionException(throwable);
+-            }
+-        });
++        // Paper start - rewrite chunk system
++        try {
++            return CompletableFuture.completedFuture(Optional.ofNullable(this.read(pos)));
++        } catch (Throwable thr) {
++            return CompletableFuture.failedFuture(thr);
++        }
++        // Paper end - rewrite chunk system
+     }
+ 
+     private void readColumn(ChunkPos pos, RegistryOps<Tag> ops, @Nullable CompoundTag nbt) {
++        if (true) throw new IllegalStateException("Only chunk system can load in state, offending class:" + this.getClass().getName()); // Paper - rewrite chunk system
+         if (nbt == null) {
+             for (int i = this.levelHeightAccessor.getMinSection(); i < this.levelHeightAccessor.getMaxSection(); i++) {
+                 this.storage.put(getKey(pos, i), Optional.empty());
+@@ -138,7 +142,7 @@
+             int j = getVersion(dynamic);
+             int k = SharedConstants.getCurrentVersion().getDataVersion().getVersion();
+             boolean bl = j != k;
+-            Dynamic<Tag> dynamic2 = this.simpleRegionStorage.upgradeChunkTag(dynamic, j);
++            Dynamic<Tag> dynamic2 = null; // Paper - rewrite chunk system
+             OptionalDynamic<Tag> optionalDynamic = dynamic2.get("Sections");
+ 
+             for (int l = this.levelHeightAccessor.getMinSection(); l < this.levelHeightAccessor.getMaxSection(); l++) {
+@@ -162,7 +166,7 @@
+         Dynamic<Tag> dynamic = this.writeColumn(pos, registryOps);
+         Tag tag = dynamic.getValue();
+         if (tag instanceof CompoundTag) {
+-            this.simpleRegionStorage.write(pos, (CompoundTag)tag);
++            try { this.write(pos, (CompoundTag)tag); } catch (IOException ex) { SectionStorage.LOGGER.error("Error writing poi chunk data to disk for chunk " + pos, ex); } // Paper - nuke IOWorker
+         } else {
+             LOGGER.error("Expected compound tag, got {}", tag);
+         }
+@@ -212,7 +216,7 @@
+     }
+ 
+     private static int getVersion(Dynamic<?> dynamic) {
+-        return dynamic.get("DataVersion").asInt(1945);
++        return dynamic.get("DataVersion").asInt(1945); // Paper - diff on change, constant used in ChunkLoadTask
+     }
+ 
+     public void flush(ChunkPos pos) {
+@@ -229,6 +233,6 @@
+ 
+     @Override
+     public void close() throws IOException {
+-        this.simpleRegionStorage.close();
++        super.close(); // Paper - nuke I/O worker - don't call the worker
+     }
+ }

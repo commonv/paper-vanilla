@@ -1,0 +1,41 @@
+--- a/net/minecraft/commands/arguments/item/ItemInput.java
++++ b/net/minecraft/commands/arguments/item/ItemInput.java
+@@ -25,8 +25,15 @@
+     );
+     private final Holder<Item> item;
+     private final DataComponentMap components;
++    @javax.annotation.Nullable private final net.minecraft.core.component.DataComponentPatch patch; // Paper
+ 
+     public ItemInput(Holder<Item> item, DataComponentMap components) {
++        // Paper start
++        this(item, components, null);
++    }
++    public ItemInput(Holder<Item> item, DataComponentMap components, @javax.annotation.Nullable final net.minecraft.core.component.DataComponentPatch patch) {
++        this.patch = patch;
++        // Paper end
+         this.item = item;
+         this.components = components;
+     }
+@@ -37,7 +44,13 @@
+ 
+     public ItemStack createItemStack(int amount, boolean checkOverstack) throws CommandSyntaxException {
+         ItemStack itemStack = new ItemStack(this.item, amount);
+-        itemStack.applyComponents(this.components);
++        // Paper start - support component removals
++        if (this.patch != null) {
++            itemStack.applyComponents(this.patch);
++        } else {
++            itemStack.applyComponents(this.components);
++        }
++        // Paper end - support component removals
+         if (checkOverstack && amount > itemStack.getMaxStackSize()) {
+             throw ERROR_STACK_TOO_BIG.create(this.getItemName(), itemStack.getMaxStackSize());
+         } else {
+@@ -68,6 +81,6 @@
+     }
+ 
+     private String getItemName() {
+-        return this.item.unwrapKey().map(ResourceKey::location).orElseGet(() -> "unknown[" + this.item + "]").toString();
++        return this.item.unwrapKey().<Object>map(ResourceKey::location).orElseGet(() -> "unknown[" + this.item + "]").toString(); // Paper - decompile fix
+     }
+ }

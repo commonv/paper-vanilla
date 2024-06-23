@@ -1,0 +1,113 @@
+--- a/net/minecraft/commands/arguments/item/ItemParser.java
++++ b/net/minecraft/commands/arguments/item/ItemParser.java
+@@ -59,8 +59,15 @@
+     static final Function<SuggestionsBuilder, CompletableFuture<Suggestions>> SUGGEST_NOTHING = SuggestionsBuilder::buildFuture;
+     final HolderLookup.RegistryLookup<Item> items;
+     final DynamicOps<Tag> registryOps;
++    final boolean allowRemoves; // Paper - support component removals
+ 
+     public ItemParser(HolderLookup.Provider registriesLookup) {
++        // Paper start - support component removals
++        this(registriesLookup, false);
++    }
++    public ItemParser(HolderLookup.Provider registriesLookup, boolean allowRemoves) {
++        this.allowRemoves = allowRemoves;
++        // Paper end - support component removals
+         this.items = registriesLookup.lookupOrThrow(Registries.ITEM);
+         this.registryOps = registriesLookup.createSerializationContext(NbtOps.INSTANCE);
+     }
+@@ -68,6 +75,7 @@
+     public ItemParser.ItemResult parse(StringReader reader) throws CommandSyntaxException {
+         final MutableObject<Holder<Item>> mutableObject = new MutableObject<>();
+         final DataComponentMap.Builder builder = DataComponentMap.builder();
++        final net.minecraft.core.component.DataComponentPatch.Builder patchBuilder = net.minecraft.core.component.DataComponentPatch.builder(); // Paper - support component removals
+         this.parse(reader, new ItemParser.Visitor() {
+             @Override
+             public void visitItem(Holder<Item> item) {
+@@ -77,12 +85,19 @@
+             @Override
+             public <T> void visitComponent(DataComponentType<T> type, T value) {
+                 builder.set(type, value);
++                // Paper start - support component removals
++                patchBuilder.set(type, value);
++            }
++            @Override
++            public <T> void visitComponentRemove(final DataComponentType<T> type) {
++                patchBuilder.remove(type);
++                // Paper end - support component removals
+             }
+         });
+         Holder<Item> holder = Objects.requireNonNull(mutableObject.getValue(), "Parser gave no item");
+         DataComponentMap dataComponentMap = builder.build();
+         validateComponents(reader, holder, dataComponentMap);
+-        return new ItemParser.ItemResult(holder, dataComponentMap);
++        return new ItemParser.ItemResult(holder, dataComponentMap, this.allowRemoves ? patchBuilder.build() : null); // Paper - support component removals
+     }
+ 
+     private static void validateComponents(StringReader reader, Holder<Item> item, DataComponentMap components) throws CommandSyntaxException {
+@@ -116,7 +131,7 @@
+         return suggestionsVisitor.resolveSuggestions(builder, stringReader);
+     }
+ 
+-    public static record ItemResult(Holder<Item> item, DataComponentMap components) {
++    public static record ItemResult(Holder<Item> item, DataComponentMap components, @javax.annotation.Nullable net.minecraft.core.component.DataComponentPatch patch) { // Paper
+     }
+ 
+     class State {
+@@ -154,17 +169,28 @@
+ 
+             while (this.reader.canRead() && this.reader.peek() != ']') {
+                 this.reader.skipWhitespace();
++                boolean removing = ItemParser.this.allowRemoves && this.reader.canRead() && this.reader.peek() == '!';
++                if (removing) {
++                    this.reader.skip();
++                    this.visitor.visitSuggestions(builder -> this.suggestComponentAssignment(builder, false));
++                }
+                 DataComponentType<?> dataComponentType = readComponentType(this.reader);
+                 if (!set.add(dataComponentType)) {
+                     throw ItemParser.ERROR_REPEATED_COMPONENT.create(dataComponentType);
+                 }
+ 
++                // Paper start - support component removals
++                if (removing) {
++                    this.visitor.visitComponentRemove(dataComponentType);
++                } else {
++                // Paper end - support component removals
+                 this.visitor.visitSuggestions(this::suggestAssignment);
+                 this.reader.skipWhitespace();
+                 this.reader.expect('=');
+                 this.visitor.visitSuggestions(ItemParser.SUGGEST_NOTHING);
+                 this.reader.skipWhitespace();
+                 this.readComponent(dataComponentType);
++                } // Paper - support component removals
+                 this.reader.skipWhitespace();
+                 this.visitor.visitSuggestions(this::suggestNextOrEndComponents);
+                 if (!this.reader.canRead() || this.reader.peek() != ',') {
+@@ -239,12 +265,18 @@
+         }
+ 
+         private CompletableFuture<Suggestions> suggestComponentAssignment(SuggestionsBuilder builder) {
++            // Paper start - support component removals
++            return this.suggestComponentAssignment(builder, true);
++        }
++        private CompletableFuture<Suggestions> suggestComponentAssignment(SuggestionsBuilder builder, boolean suggestRemove) {
+             String string = builder.getRemaining().toLowerCase(Locale.ROOT);
++            if (suggestRemove && string.isBlank()) builder.suggest("!", Component.literal("Remove a data component"));
++            // Paper end - support component removals
+             SharedSuggestionProvider.filterResources(BuiltInRegistries.DATA_COMPONENT_TYPE.entrySet(), string, entry -> entry.getKey().location(), entry -> {
+                 DataComponentType<?> dataComponentType = entry.getValue();
+                 if (dataComponentType.codec() != null) {
+                     ResourceLocation resourceLocation = entry.getKey().location();
+-                    builder.suggest(resourceLocation.toString() + "=");
++                    builder.suggest(resourceLocation.toString() + (suggestRemove ? "=" : "")); // Paper - support component removals
+                 }
+             });
+             return builder.buildFuture();
+@@ -270,6 +302,7 @@
+ 
+         default <T> void visitComponent(DataComponentType<T> type, T value) {
+         }
++        default <T> void visitComponentRemove(DataComponentType<T> type) {} // Paper
+ 
+         default void visitSuggestions(Function<SuggestionsBuilder, CompletableFuture<Suggestions>> suggestor) {
+         }

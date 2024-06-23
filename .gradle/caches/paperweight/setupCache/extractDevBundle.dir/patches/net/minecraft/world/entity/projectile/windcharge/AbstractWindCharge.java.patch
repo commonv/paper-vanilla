@@ -1,0 +1,136 @@
+--- a/net/minecraft/world/entity/projectile/windcharge/AbstractWindCharge.java
++++ b/net/minecraft/world/entity/projectile/windcharge/AbstractWindCharge.java
+@@ -21,8 +21,12 @@
+ import net.minecraft.world.phys.BlockHitResult;
+ import net.minecraft.world.phys.EntityHitResult;
+ import net.minecraft.world.phys.HitResult;
++// CraftBukkit start
++import org.bukkit.event.entity.EntityRemoveEvent;
++// CraftBukkit end
+ 
+ public abstract class AbstractWindCharge extends AbstractHurtingProjectile implements ItemSupplier {
++
+     public static final AbstractWindCharge.WindChargeDamageCalculator EXPLOSION_DAMAGE_CALCULATOR = new AbstractWindCharge.WindChargeDamageCalculator();
+ 
+     public AbstractWindCharge(EntityType<? extends AbstractWindCharge> type, Level world) {
+@@ -34,55 +38,58 @@
+         this.setOwner(owner);
+     }
+ 
+-    AbstractWindCharge(
+-        EntityType<? extends AbstractWindCharge> type, double x, double y, double z, double directionX, double directionY, double directionZ, Level world
+-    ) {
++    AbstractWindCharge(EntityType<? extends AbstractWindCharge> type, double x, double y, double z, double directionX, double directionY, double directionZ, Level world) {
+         super(type, x, y, z, directionX, directionY, directionZ, world);
+     }
+ 
+     @Override
+     protected AABB makeBoundingBox() {
+         float f = this.getType().getDimensions().width() / 2.0F;
+-        float g = this.getType().getDimensions().height();
+-        float h = 0.15F;
+-        return new AABB(
+-            this.position().x - (double)f,
+-            this.position().y - 0.15F,
+-            this.position().z - (double)f,
+-            this.position().x + (double)f,
+-            this.position().y - 0.15F + (double)g,
+-            this.position().z + (double)f
+-        );
++        float f1 = this.getType().getDimensions().height();
++        float f2 = 0.15F;
++
++        return new AABB(this.position().x - (double) f, this.position().y - 0.15000000596046448D, this.position().z - (double) f, this.position().x + (double) f, this.position().y - 0.15000000596046448D + (double) f1, this.position().z + (double) f);
+     }
+ 
+     @Override
+     public boolean canCollideWith(Entity other) {
+-        return !(other instanceof AbstractWindCharge) && super.canCollideWith(other);
++        return other instanceof AbstractWindCharge ? false : super.canCollideWith(other);
+     }
+ 
+     @Override
+     public boolean canHitEntity(Entity entity) {
+-        return !(entity instanceof AbstractWindCharge) && entity.getType() != EntityType.END_CRYSTAL && super.canHitEntity(entity);
++        return entity instanceof AbstractWindCharge ? false : (entity.getType() == EntityType.END_CRYSTAL ? false : super.canHitEntity(entity));
+     }
+ 
+     @Override
+     protected void onHitEntity(EntityHitResult entityHitResult) {
+         super.onHitEntity(entityHitResult);
+         if (!this.level().isClientSide) {
+-            LivingEntity livingEntity2 = this.getOwner() instanceof LivingEntity livingEntity ? livingEntity : null;
+-            Entity entity = entityHitResult.getEntity().getPassengerClosestTo(entityHitResult.getLocation()).orElse(entityHitResult.getEntity());
+-            if (livingEntity2 != null) {
+-                livingEntity2.setLastHurtMob(entity);
++            Entity entity = this.getOwner();
++            LivingEntity entityliving;
++
++            if (entity instanceof LivingEntity) {
++                LivingEntity entityliving1 = (LivingEntity) entity;
++
++                entityliving = entityliving1;
++            } else {
++                entityliving = null;
+             }
+ 
+-            entity.hurt(this.damageSources().windCharge(this, livingEntity2), 1.0F);
++            LivingEntity entityliving2 = entityliving;
++            Entity entity1 = (Entity) entityHitResult.getEntity().getPassengerClosestTo(entityHitResult.getLocation()).orElse(entityHitResult.getEntity());
++
++            if (entityliving2 != null) {
++                entityliving2.setLastHurtMob(entity1);
++            }
++
++            entity1.hurt(this.damageSources().windCharge(this, entityliving2), 1.0F);
+             this.explode();
+         }
+     }
+ 
+     @Override
+-    public void push(double deltaX, double deltaY, double deltaZ) {
+-    }
++    public void push(double deltaX, double deltaY, double deltaZ, @org.jetbrains.annotations.Nullable Entity pushingEntity) {} // Paper - Add EntityKnockbackByEntityEvent and EntityPushedByEntityAttackEvent
+ 
+     public abstract void explode();
+ 
+@@ -91,16 +98,18 @@
+         super.onHitBlock(blockHitResult);
+         if (!this.level().isClientSide) {
+             this.explode();
+-            this.discard();
++            this.discard(EntityRemoveEvent.Cause.HIT); // CraftBukkit - add Bukkit remove cause
+         }
++
+     }
+ 
+     @Override
+     protected void onHit(HitResult hitResult) {
+         super.onHit(hitResult);
+         if (!this.level().isClientSide) {
+-            this.discard();
++            this.discard(EntityRemoveEvent.Cause.HIT); // CraftBukkit - add Bukkit remove cause
+         }
++
+     }
+ 
+     @Override
+@@ -133,13 +142,17 @@
+     public void tick() {
+         if (!this.level().isClientSide && this.getBlockY() > this.level().getMaxBuildHeight() + 30) {
+             this.explode();
+-            this.discard();
++            this.discard(EntityRemoveEvent.Cause.OUT_OF_WORLD); // CraftBukkit - add Bukkit remove cause
+         } else {
+             super.tick();
+         }
++
+     }
+ 
+     public static class WindChargeDamageCalculator extends ExplosionDamageCalculator {
++
++        public WindChargeDamageCalculator() {}
++
+         @Override
+         public boolean shouldDamageEntity(Explosion explosion, Entity entity) {
+             return false;
